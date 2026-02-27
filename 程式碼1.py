@@ -63,7 +63,7 @@ def load_data():
     if os.path.exists(csv_file):
         for enc in ['utf-8-sig', 'big5', 'gbk']:
             try:
-                df = pd.read_csv(csv_file, encoding=enc)
+                df = pd.read_csv(csv_file, encoding=utf-8-sig)
                 df.columns = [c.strip() for c in df.columns]
                 return df
             except:
@@ -178,3 +178,4 @@ if query:
                 st.error(f"AI 解析失敗: {e}")
 
 st.markdown("---")
+
