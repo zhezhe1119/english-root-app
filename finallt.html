@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英文字根分解器 - CSV 實時讀取版</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #0E1117;
+            --sidebar-color: #161B22;
+            --border-color: #30363D;
+            --success-bg: #163020;
+            --success-text: #4ADE80;
+            --info-blue: #0C1D33;
+            --accent-blue: #58A6FF;
+            --text-main: #FFFFFF;
+            --text-dim: #8B949E;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        aside {
+            width: 280px;
+            background-color: var(--sidebar-color);
+            border-right: 1px solid var(--border-color);
+            padding: 25px;
+            box-sizing: border-box;
+            position: fixed;
+            height: 100vh;
+        }
+
+        main {
+            flex: 1;
+            margin-left: 280px;
+            padding: 40px;
+            max-width: 900px;
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 14px;
+            background: #0d1117;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: white;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+            outline: none;
+        }
+
+        .status-success {
+            background-color: var(--success-bg);
+            border-radius: 6px;
+            padding: 12px 15px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            font-weight: 500;
+        }
+
+        .root-tag-box {
+            background-color: var(--success-bg);
+            padding: 12px 15px;
+            border-radius: 6px;
+            color: var(--success-text);
+            font-family: monospace;
+            margin-bottom: 10px;
+            border: 1px solid rgba(74, 222, 128, 0.2);
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #f1c40f;
+            color: black;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            z-index: 100;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="app" style="display: contents;">
+        <div v-if="isLoading" class="loading-overlay">⏳ 正在載入 CSV 字庫...</div>
+
+        <aside>
+            <h3>⚙️ 設定面板</h3>
+            <label style="font-size: 0.8rem; color: var(--text-dim);">Google API Key</label>
+            <input type="password" v-model="apiKey" placeholder="在此輸入 Key..."
+                style="width: 100%; background: #0d1117; border: 1px solid var(--border-color); color: white; padding: 10px; border-radius: 4px; box-sizing: border-box;">
+            <hr style="border:0; border-top:1px solid var(--border-color); margin: 20px 0;">
+            <div style="color: var(--text-dim); font-size: 0.85rem; line-height: 1.6;">
+                <b>資料狀態：</b><br>
+                CSV 檔案：{{ csvStatus }}<br>
+                總字數：{{ Object.keys(vocabData).length }}
+            </div>
+        </aside>
+
+        <main>
+            <h1>📑 英文字根分解器</h1>
+            <input type="text" class="search-box" v-model="query" placeholder="🔍 請輸入要分解的英文單字...">
+
+            <div v-if="query.trim()" style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px;">
+                <section>
+                    <h3>📑 詞彙查詢結果</h3>
+                    <div v-if="currentWordData">
+                        <div class="status-success">✅ 詞彙中有該單字</div>
+                        <div v-for="(val, key) in currentWordData" :key="key" style="margin-bottom: 10px;">
+                            <b style="color:var(--text-dim)">{{ key }}：</b> {{ val }}
+                        </div>
+                    </div>
+                    <div v-else style="color: #E2B714;">
+                        ⚠️ 字庫中查無此單字。
+                    </div>
+                </section>
+
+                <section>
+                    <h3>🤖 本地字根解析</h3>
+                    <div v-for="root in detectedRoots" :key="root.key" class="root-tag-box">
+                        <b>{{ root.key }}</b> → {{ root.val }}
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    query: '',
+                    apiKey: '',
+                    isLoading: true,
+                    csvStatus: '等待中...',
+                    vocabData: {}, // 這裡會存放解析後的 CSV 資料
+                    wordRoots: {
+                        'anti': '反對、對抗 (against)', 'auto': '自我 (self)', 'bi': '二 (two)',
+                        'co': '共同 (together)', 'de': '向下、去除 (down/remove)', 'dis': '不、相反 (not/opposite)',
+                        'ex': '向外、前任 (out/former)', 'inter': '之間 (between)', 'mis': '錯誤 (wrong)',
+                        'non': '非、不 (not)', 'pre': '預先 (before)', 're': '再次、往回 (again/back)',
+                        'sub': '在下面 (under)', 'super': '在上面、超越 (above/over)', 'trans': '穿越 (across)',
+                        'un': '不、否定 (not)', 'tri': '三 (three)', 'uni': '一 (one)',
+                        'ann': '年 (year)', 'audi': '聽 (listen)', 'bio': '生命 (life)',
+                        'cept': '拿、取 (take/seize)', 'cede': '行進、讓步 (go/yield)', 'circ': '環、圓 (circle)',
+                        'dict': '說 (say/speak)', 'duc': '引導 (lead)', 'form': '形狀 (shape)',
+                        'graph': '寫、畫 (write/draw)', 'ject': '投、擲 (throw)', 'manu': '手 (hand)',
+                        'mob': '移動 (move)', 'port': '搬運 (carry)', 'pos': '放置 (put/place)',
+                        'rupt': '破裂 (break)', 'scribe': '寫 (write)', 'spec': '看 (look/see)',
+                        'struct': '建立 (build)', 'vid': '看 (see)', 'viv': '活 (live)',
+                        'voc': '聲音 (voice)', 'path': '感情 (feel/suffer)', 'phil': '愛 (love)',
+                        'able': '能夠...的 (can be done)', 'al': '關於...的 (pertaining to)', 'er': '人、物 (person/thing)',
+                        'ful': '充滿...的 (full of)', 'ion': '行為、過程 (act/process)', 'ism': '主義、信念 (belief/ism)',
+                        'ist': '專家、人 (specialist)', 'ity': '狀態、性質 (state/quality)', 'less': '沒有 (without)',
+                        'ly': '地、狀態 (how something is)', 'ment': '行為、結果 (action/result)', 'ness': '性質、狀態 (state/quality)'
+                    }
+                }
+            },
+            computed: {
+                currentWordData() {
+                    const q = this.query.toLowerCase().trim();
+                    return this.vocabData[q] || null;
+                },
+                detectedRoots() {
+                    const word = this.query.toLowerCase().trim();
+                    if (!word) return [];
+                    return Object.entries(this.wordRoots)
+                        .filter(([key]) => word.includes(key))
+                        .map(([key, val]) => ({ key, val }))
+                        .sort((a, b) => b.key.length - a.key.length);
+                }
+            },
+            mounted() {
+                this.loadCSV();
+            },
+            // ... (其餘 HTML/CSS 保持不變)
+
+            methods: {
+                loadCSV() {
+                    // 使用 GitHub Pages 相容的相對路徑
+                    const csvPath = "大考中心分級字彙.csv";
+
+                    Papa.parse(csvPath, {
+                        download: true,
+                        header: true,
+                        skipEmptyLines: true,
+                        encoding: "UTF-8", // 建議 CSV 儲存為 UTF-8
+                        complete: (results) => {
+                            const dict = {};
+                            if (results.data.length === 0) {
+                                this.csvStatus = '讀取成功但無資料';
+                                return;
+                            }
+
+                            results.data.forEach(row => {
+                                // 自動清理鍵值對的空白字元
+                                const cleanedRow = {};
+                                Object.keys(row).forEach(k => cleanedRow[k.trim()] = row[k]);
+
+                                const wordKey = cleanedRow.word || cleanedRow.Word || cleanedRow['單字'];
+                                if (wordKey) {
+                                    dict[wordKey.toLowerCase().trim()] = cleanedRow;
+                                }
+                            });
+
+                            this.vocabData = dict;
+                            this.isLoading = false;
+                            this.csvStatus = '✅ 已連線並載入';
+                        },
+                        error: (err) => {
+                            console.error("CSV Error:", err);
+                            this.csvStatus = '❌ 找不到 CSV 檔案';
+                            this.isLoading = false;
+                        }
+                    });
+                }
+            }
+
+        }).mount('#app')
+    </script>
+
+</body>
+
+</html>
