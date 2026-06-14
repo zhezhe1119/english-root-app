@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英文字根分解器 - CSV 實時讀取版</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #0E1117;
+            --sidebar-color: #161B22;
+            --border-color: #30363D;
+            --success-bg: #163020;
+            --success-text: #4ADE80;
+            --info-blue: #0C1D33;
+            --accent-blue: #58A6FF;
+            --text-main: #FFFFFF;
+            --text-dim: #8B949E;
+            --warning-bg: #2d2206;
+            --warning-text: #e2b714;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        aside {
+            width: 280px;
+            background-color: var(--sidebar-color);
+            border-right: 1px solid var(--border-color);
+            padding: 25px;
+            box-sizing: border-box;
+            position: fixed;
+            height: 100vh;
+        }
+
+        main {
+            flex: 1;
+            margin-left: 280px;
+            padding: 40px;
+            max-width: 900px;
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 14px;
+            background: #0d1117;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: white;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+            outline: none;
+        }
+
+        .status-success {
+            background-color: var(--success-bg);
+            border-radius: 6px;
+            padding: 12px 15px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            font-weight: 500;
+        }
+
+        .root-tag-box {
+            background-color: var(--success-bg);
+            padding: 12px 15px;
+            border-radius: 6px;
+            color: var(--success-text);
+            font-family: monospace;
+            margin-bottom: 10px;
+            border: 1px solid rgba(74, 222, 128, 0.2);
+        }
+
+        /* 調整 AI 回應區塊，使其符合圖片中的樣式 */
+        .ai-response-box {
+            background-color: transparent;
+            padding: 10px 0;
+            line-height: 1.8;
+            font-size: 1rem;
+            white-space: pre-line; /* 保持 AI 回傳的換行與縮排格式 */
+            color: var(--text-main);
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #f1c40f;
+            color: black;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            z-index: 100;
+        }
+        
+        .btn-ai {
+            background-color: #238636;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        .btn-ai:disabled {
+            background-color: var(--border-color);
+            cursor: not-allowed;
+            color: var(--text-dim);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="app" style="display: contents;">
+        <div v-if="isLoading" class="loading-overlay">⏳ 正在載入 CSV 字庫...</div>
+
+        <aside>
+            <h3>⚙️ 設定面板</h3>
+            <label style="font-size: 0.8rem; color: var(--text-dim);">Google API Key</label>
+            <input type="password" v-model="apiKey" placeholder="在此輸入 Key..."
+                style="width: 100%; background: #0d1117; border: 1px solid var(--border-color); color: white; padding: 10px; border-radius: 4px; box-sizing: border-box;">
+            <hr style="border:0; border-top:1px solid var(--border-color); margin: 20px 0;">
+            <div style="color: var(--text-dim); font-size: 0.85rem; line-height: 1.6;">
+                <b>資料狀態：</b><br>
+                CSV 檔案：{{ csvStatus }}<br>
+                總字數：{{ Object.keys(vocabData).length }}
+            </div>
+        </aside>
+
+        <main>
+            <h1>📑 英文字根分解器</h1>
+            <input type="text" class="search-box" v-model="query" placeholder="🔍 請輸入要分解的英文單字..." @input="onQueryChange">
+
+            <div v-if="query.trim()" style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px;">
+                <div>
+                    <section style="margin-bottom: 30px;">
+                        <h3>📑 詞彙查詢結果</h3>
+                        <div v-if="currentWordData">
+                            <div class="status-success">✅ 詞彙中有該單字</div>
+                            <div v-for="(val, key) in currentWordData" :key="key" style="margin-bottom: 10px;">
+                                <b style="color:var(--text-dim)">{{ key }}：</b> {{ val }}
+                            </div>
+                        </div>
+                        <div v-else style="color: #E2B714;">
+                            ⚠️ 字庫中查無此單字。
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3>🤖 本地字根解析</h3>
+                        <div v-if="detectedRoots.length > 0">
+                            <div v-for="root in detectedRoots" :key
